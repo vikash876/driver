@@ -1,0 +1,7 @@
+Following command extracts data from block device and dumps it to
+a text file.
+
+dd if=/dev/sda of=new.txt bs=1024 count=1
+
+use :%!xxd in vim to see data in hex format.
+note: every mbr ends with a signature 0x55AA search for it.
