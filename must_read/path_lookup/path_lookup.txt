@@ -1,11 +1,11 @@
-The path_lookup() function executes the following steps:
+The path_lookup(char *pathname, struct nameidata nd, int flags) function executes the following steps:
 
     1. Initializes some fields of the nd parameter as follows:
         a.  Sets the last_type field to LAST_ROOT (this is needed if the pathname is a
             slash or a sequence of slashes; see the later section “Parent Pathname
             Lookup”).
-        b. Sets the flags field to the value of the flags parameter
-        c. Sets the depth field to 0.
+        b.  Sets the flags field to the value of the flags parameter
+        c.  Sets the depth field to 0.
     2.  Acquires for reading the current->fs->lock read/write semaphore of the current
         process.
     3.  If the first character in the pathname is a slash ( / ), the lookup operation must
