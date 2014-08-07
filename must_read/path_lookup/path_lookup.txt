@@ -1,0 +1,39 @@
+The path_lookup() function executes the following steps:
+
+    1. Initializes some fields of the nd parameter as follows:
+        a.  Sets the last_type field to LAST_ROOT (this is needed if the pathname is a
+            slash or a sequence of slashes; see the later section “Parent Pathname
+            Lookup”).
+        b. Sets the flags field to the value of the flags parameter
+        c. Sets the depth field to 0.
+    2.  Acquires for reading the current->fs->lock read/write semaphore of the current
+        process.
+    3.  If the first character in the pathname is a slash ( / ), the lookup operation must
+        start from the root directory of current: the function gets the addresses of the
+        corresponding mounted filesystem object (current->fs->rootmnt) and dentry
+        object (current->fs->root), increases their usage counters, and stores the
+        addresses in nd->mnt and nd->dentry, respectively.
+    4.  Otherwise, if the first character in the pathname is not a slash, the lookup opera-
+        tion must start from the current working directory of current: the function gets
+        the addresses of the corresponding mounted filesystem object (current->fs->
+        pwdmnt) and dentry object (current->fs->pwd), increases their usage counters,
+        and stores the addresses in nd->mnt and nd->dentry, respectively.
+    5.  Releases the current->fs->lock read/write semaphore of the current process.
+    6.  Sets the total_link_count field in the descriptor of the current process to 0 (see
+        the later section “Lookup of Symbolic Links”).
+
+    7.  Invokes the link_path_walk() function to take care of the undergoing lookup
+        operation:
+        return link_path_walk(name, nd);
+
+We are now ready to describe the core of the pathname lookup operation, namely
+the link_path_walk() function. It receives as its parameters a pointer name to the
+pathname to be resolved and the address nd of a nameidata data structure.
+To make things a bit easier, we first describe what link_path_walk( ) does when
+LOOKUP_PARENT is not set and the pathname does not contain symbolic links (stan-
+dard pathname lookup). Next, we discuss the case in which LOOKUP_PARENT is set: this
+type of lookup is required when creating, deleting, or renaming a directory entry,
+that is, during a parent pathname lookup. Finally, we explain how the function
+resolves symbolic links.
+
+Note: See link path walk.

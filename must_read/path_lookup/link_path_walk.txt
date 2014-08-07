@@ -1,0 +1,167 @@
+Standard Pathname Lookup
+
+When the LOOKUP_PARENT flag is cleared, link_path_walk( ) performs the following
+steps.
+
+1.  Initializes the lookup_flags local variable with nd->flags.
+2.  Skips all leading slashes (/) before the first component of the pathname.
+3.  If the remaining pathname is empty, it returns the value 0. In the nameidata data
+    structure, the dentry and mnt fields point to the objects relative to the last
+    resolved component of the original pathname.
+4.  If the depth field of the nd descriptor is positive, it sets the LOOKUP_FOLLOW flag in
+    the lookup_flags local variable (see the section “Lookup of Symbolic Links”).
+5.  Executes a cycle that breaks the pathname passed in the name parameter into
+    components (the intermediate slashes are treated as filename separators); for
+    each component found, the function:
+    a.  Retrieves the address of the inode object of the last resolved component
+        from nd->dentry->d_inode. (In the first iteration, the inode refers to the
+        directory from where to start the pathname lookup.)
+    b.  Checks that the permissions of the last resolved component stored into the
+        inode allow execution (in Unix, a directory can be traversed only if it is exe-
+        cutable). If the inode has a custom permission method, the function exe-
+        cutes it; otherwise, it executes the exec_permission_lite() function, which
+        examines the access mode stored in the i_mode inode field and the privileges
+        of the running process. In both cases, if the last resolved component does
+        not allow execution, link_path_walk( ) breaks out of the cycle and returns
+        an error code.
+    c.  Considers the next component to be resolved. From its name, the function
+        computes a 32-bit hash value to be used when looking in the dentry cache
+        hash table.
+    d.  Skips any trailing slash (/) after the slash that terminates the name of the
+        component to be resolved.
+    e.  If the component to be resolved is the last one in the original pathname, it
+        jumps to step 6.
+    f.  If the name of the component is “.” (a single dot), it continues with the next
+        component (“.” refers to the current directory, so it has no effect inside a
+        pathname).
+    g.  If the name of the component is “. .” (two dots), it tries to climb to the par-
+        ent directory:
+
+        1.  If the last resolved directory is the process’s root directory (nd->dentry is
+            equal to current->fs->root and nd->mnt is equal to current->fs->
+            rootmnt), then climbing is not allowed: it invokes follow_mount() on the
+            last resolved component (see below) and continues with the next com-
+            ponent.
+        2.  If the last resolved directory is the root directory of the nd->mnt filesys-
+            tem (nd->dentry is equal to nd->mnt->mnt_root) and the nd->mnt filesys-
+            tem is not mounted on top of another filesystem (nd->mnt is equal to nd-
+            >mnt->mnt_parent), then the nd->mnt filesystem is usually* the
+            namespace’s root filesystem: in this case, climbing is impossible, thus
+            invokes follow_mount() on the last resolved component (see below) and
+            continues with the next component.
+        3.  If the last resolved directory is the root directory of the nd->mnt filesys-
+            tem and the nd->mnt filesystem is mounted on top of another filesystem,
+            a filesystem switch is required. So, the function sets nd->dentry to nd->
+            mnt->mnt_mountpoint, and nd->mnt to nd->mnt->mnt_parent, then restarts
+            step 5g (recall that several filesystems can be mounted on the same
+            mount point).
+        4.  If the last resolved directory is not the root directory of a mounted file-
+            system, then the function must simply climb to the parent directory: it
+            sets nd->dentry to nd->dentry->d_parent, invokes follow_mount() on the
+            parent directory, and continues with the next component.
+            The follow_mount() function checks whether nd->dentry is a mount point
+            for some filesystem (nd->dentry->d_mounted is greater than zero); in this
+            case, it invokes lookup_mnt() to search the root directory of the mounted
+            filesystem in the dentry cache, and updates nd->dentry and nd->mnt with the
+            object addresses corresponding to the mounted filesystem; then, it repeats
+            the whole operation (there can be several filesystems mounted on the same
+            mount point). Essentially, invoking the follow_mount() function when
+            climbing to the parent directory is required because the process could start
+            the pathname lookup from a directory included in a filesystem hidden by
+            another filesystem mounted over the parent directory.
+    h.  The component name is neither “.” nor “. .”, so the function must look it
+        up in the dentry cache. If the low-level filesystem has a custom d_hash den-
+        try method, the function invokes it to modify the hash value already com-
+        puted in step 5c.
+    i.  Sets the LOOKUP_CONTINUE flag in nd->flags to denote that there is a next com-
+        ponent to be analyzed.
+    j.  Invokes do_lookup( ) to derive the dentry object associated with a given par-
+        ent directory (nd->dentry) and filename (the pathname component being
+        resolved). The function essentially invokes _ _d_lookup() first to search the
+        dentry object of the component in the dentry cache. If no such object exists,
+        do_lookup() invokes real_lookup(). This latter function reads the directory
+        from disk by executing the lookup method of the inode, creates a new den-
+        try object and inserts it in the dentry cache, then creates a new inode object
+        and inserts it into the inode cache.* At the end of this step, the dentry and
+        mnt fields of the next local variable will point, respectively, to the dentry
+        object and the mounted filesystem object of the component name to be
+        resolved in this cycle.
+    k.  Invokes the follow_mount() function to check whether the component just
+        resolved (next.dentry) refers to a directory that is a mount point for some
+        filesystem (next.dentry->d_mounted is greater than zero). follow_mount()
+        updates next.dentry and next.mnt so that they point to the dentry object
+        and mounted filesystem object of the upmost filesystem mounted on the
+        directory specified by this pathname component (see step 5g).
+    l.  Checks whether the component just resolved refers to a symbolic link (next.
+        dentry->d_inode has a custom follow_link method). We’ll deal with this
+        case in the later section “Lookup of Symbolic Links.”
+        m. Checks whether the component just resolved refers to a directory (next.dentry-
+        >d_inode has a custom lookup method). If not, returns the error -ENOTDIR,
+        because the component is in the middle of the original pathname.
+        n. Sets nd->dentry to next.dentry and nd->mnt to next.mnt, then continues with
+        the next component of the pathname.
+6.  Now all components of the original pathname are resolved except the last one.
+    Clears the LOOKUP_CONTINUE flag in nd->flags.
+7. If the pathname has a trailing slash, it sets the LOOKUP_FOLLOW and LOOKUP_
+DIRECTORY flags in the lookup_flags local variable to force the last component to
+be interpreted by later functions as a directory name.
+8. Checks the value of the LOOKUP_PARENT flag in the lookup_flags variable. In the
+following, we assume that the flag is set to 0, and we postpone the opposite case
+to the next section.
+9. If the name of the last component is “.” (a single dot), terminates the execution
+and returns the value 0 (no error). In the nameidata structure that nd points to,
+the dentry and mnt fields refer to the objects relative to the next-to-last compo-
+nent of the pathname (each component “.” has no effect inside a pathname).
+10. If the name of the last component is “. .” (two dots), it tries to climb to the par-
+ent directory:
+a. If the last resolved directory is the process’s root directory (nd->dentry is
+equal to current->fs->root and nd->mnt is equal to current->fs->rootmnt), it
+invokes follow_mount() on the next-to-last component and terminates the
+execution and returns the value 0 (no error). nd->dentry and nd->mnt refer to
+the objects relative to the next-to-last component of the pathname—that is,
+to the root directory of the process.
+b. If the last resolved directory is the root directory of the nd->mnt filesystem
+(nd->dentry is equal to nd->mnt->mnt_root) and the nd->mnt filesystem is not
+mounted on top of another filesystem (nd->mnt is equal to nd->mnt->mnt_
+parent), then climbing is impossible, thus invokes follow_mount() on the
+next-to-last component and terminates the execution and returns the value 0
+(no error).
+c. If the last resolved directory is the root directory of the nd->mnt filesystem
+and the nd->mnt filesystem is mounted on top of another filesystem, it sets
+nd->dentry to nd->mnt->mnt_mountpoint and nd->mnt to nd->mnt->mnt_parent,
+then restarts step 10.
+d. If the last resolved directory is not the root directory of a mounted filesys-
+tem, it sets nd->dentry to nd->dentry->d_parent, invokes follow_mount() on
+the parent directory, and terminates the execution and returns the value 0
+(no error). nd->dentry and nd->mnt refer to the objects relative to the compo-
+nent preceding the next-to-last component of the pathname.
+11. The name of the last component is neither “.” nor “. .”, so the function must
+look it up in the dentry cache. If the low-level filesystem has a custom d_hash
+dentry method, the function invokes it to modify the hash value already com-
+puted in step 5c.
+12. Invokes do_lookup( ) to derive the dentry object associated with the parent direc-
+tory and the filename (see step 5j). At the end of this step, the next local variable
+contains the pointers to both the dentry and the mounted filesystem descriptor
+relative to the last component name.
+13. Invokes follow_mount() to check whether the last component is a mount point
+for some filesystem and, if this is the case, to update the next local variable with
+the addresses of the dentry object and mounted filesystem object relative to the
+root directory of the upmost mounted filesystem.
+14. Checks whether the LOOKUP_FOLLOW flag is set in lookup_flags and the inode
+object next.dentry->d_inode has a custom follow_link method. If this is the
+case, the component is a symbolic link that must be interpreted, as described in
+the later section “Lookup of Symbolic Links.”
+15. The component is not a symbolic link or the symbolic link should not be inter-
+preted. Sets the nd->mnt and nd->dentry fields with the value stored in next.mnt
+and next.dentry, respectively. The final dentry object is the result of the whole
+lookup operation.
+16. Checks whether nd->dentry->d_inode is NULL. This happens when there is no
+inode associated with the dentry object, usually because the pathname refers to a
+nonexistent file. In this case, the function returns the error code -ENOENT.
+17. There is an inode associated with the last component of the pathname. If the
+LOOKUP_DIRECTORY flag is set in lookup_flags, it checks that the inode has a cus-
+tom lookup method—that is, it is a directory. If not, the function returns the
+error code -ENOTDIR.
+18. Returns the value 0 (no error). nd->dentry and nd->mnt refer to the last compo-
+nent of the pathname.
+
